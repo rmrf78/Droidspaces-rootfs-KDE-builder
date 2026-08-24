@@ -278,12 +278,65 @@ require_commands() {
 
 download_stdout() {
     local url="$1"
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 120 "$url"
+        if [ -n "$token" ]; then
+            curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 120 \
+                -H "Authorization: Bearer $token" "$url"
+        else
+            curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 --max-time 120 "$url"
+        fi
+    elif [ -n "$token" ]; then
+        wget -q --tries=5 --timeout=20 --waitretry=3 --retry-connrefused \
+            --header="Authorization: Bearer $token" -O - "$url"
     else
         wget -q --tries=5 --timeout=20 --waitretry=3 --retry-connrefused -O - "$url"
     fi
+}
+
+# 解析 releases/latest 经 GET 重定向后的最终 URL（不消耗 API 额度）
+download_url_effective() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o /dev/null -w '%{url_effective}' --connect-timeout 20 --max-time 60 "$1"
+    else
+        wget -q --max-redirect=10 -S --spider "$1" 2>&1 |
+            sed -n 's/^[[:space:]]*Location:[[:space:]]*//p' | tail -n 1
+    fi
+}
+
+# GitHub API 匿名额度在 CI 共享出口 IP 上极易耗尽（HTTP 403）。
+# 降级路径：完全绕开 API —— GET 重定向解析最新 TAG，再从 expanded_assets
+# 页面抓取资产列表，拼装出与 API 元数据同构的 JSON。
+scrape_release_metadata_fallback() {
+    local tag page
+
+    tag="$(download_url_effective "${GITHUB_RELEASE_URL}/${MESA_REPOSITORY}/releases/latest")" || return 1
+    tag="${tag##*/releases/tag/}"
+    tag="${tag%%\?*}"
+    tag="${tag%%#*}"
+    [[ "$tag" =~ ^[A-Za-z0-9._+~-]+$ && "$tag" != "." && "$tag" != *..* ]] || return 1
+
+    page="$(download_stdout "${GITHUB_RELEASE_URL}/${MESA_REPOSITORY}/releases/expanded_assets/${tag}")" || return 1
+
+    printf '%s' "$page" |
+        grep -oE 'href="[^"]*/releases/download/[^"]*"' |
+        sed 's/^href="//; s/"$//' |
+        jq -Rsc --arg tag "$tag" '
+            {
+              tag_name: $tag,
+              draft: false,
+              prerelease: false,
+              assets: (
+                split("\n")[:-1]
+                | map({
+                    name: (split("/")[-1]),
+                    browser_download_url: ("https://github.com" + .),
+                    digest: ""
+                  })
+              )
+            }
+        '
 }
 
 download_file() {
@@ -303,9 +356,14 @@ resolve_release_asset() {
     local metadata asset_json expected_download_url
 
     log "正在读取 Mesa 最新 Release..." "Reading the latest Mesa Release..."
-    metadata="$(download_stdout "$MESA_API_URL")" || die \
-        "无法获取 Mesa Release 信息，可能触发了 GitHub API 限制。" \
-        "Unable to fetch Mesa Release metadata; the GitHub API may be rate-limited."
+    metadata="$(download_stdout "$MESA_API_URL")" || metadata=""
+    if [ -z "$metadata" ]; then
+        log "GitHub API 获取失败（可能限流），改用网页解析降级路径..." \
+            "GitHub API failed (possibly rate-limited); falling back to web scraping..."
+        metadata="$(scrape_release_metadata_fallback)" || die \
+            "无法获取 Mesa Release 信息，API 与降级路径均失败。" \
+            "Unable to fetch Mesa Release metadata via API or fallback."
+    fi
 
     asset_json="$(jq -ce --arg pattern "$ASSET_PATTERN" '
         if (.draft // false) or (.prerelease // false) then

@@ -202,13 +202,20 @@ download_file() {
 
 download_stdout() {
     local url="$1"
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 60 "$url"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q --tries=3 --timeout=20 --waitretry=3 --retry-connrefused -O - "$url"
+        if [ -n "$token" ]; then
+            curl -fsSL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 60 \
+                -H "Authorization: Bearer $token" "$url"
+        else
+            curl -fsSL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 60 "$url"
+        fi
+    elif [ -n "$token" ]; then
+        wget -q --tries=3 --timeout=20 --waitretry=3 --retry-connrefused \
+            --header="Authorization: Bearer $token" -O - "$url"
     else
-        die "未找到 curl 或 wget，无法读取 Release 信息。" "Neither curl nor wget was found; Release information cannot be read."
+        wget -q --tries=3 --timeout=20 --waitretry=3 --retry-connrefused -O - "$url"
     fi
 }
 

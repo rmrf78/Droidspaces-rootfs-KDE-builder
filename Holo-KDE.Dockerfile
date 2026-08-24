@@ -32,6 +32,8 @@ ARG USERNAME
 ARG ANLAND_KDE_RELEASE_REPOSITORY=Goldzxcbug/Droidspaces-rootfs-KDE-builder
 ARG ANLAND_KDE_RELEASE_TAG
 ARG ANLAND_KDE_PACKAGE_REVISION=unknown
+# 仅用于构建期调用 GitHub API 防止匿名限流；不会写入最终镜像层
+ARG GITHUB_TOKEN=""
 ######################################################
 
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
@@ -129,6 +131,7 @@ RUN if [ "$ENABLE_anland_kde_ARG" = "true" ]; then \
         echo "--> [enabled] Installing Anland KDE packages (${ANLAND_KDE_PACKAGE_REVISION})..." && \
         ANLAND_KDE_RELEASE_REPOSITORY="$ANLAND_KDE_RELEASE_REPOSITORY" \
         ANLAND_KDE_RELEASE_TAG="${ANLAND_KDE_RELEASE_TAG:-anland-kde-packages}" \
+        GITHUB_TOKEN="${GITHUB_TOKEN}" \
         /usr/local/sbin/install-anland-kde --1 && \
         echo "--> [enabled] Anland KDE support installed"; \
     fi
@@ -258,7 +261,7 @@ EOF_RUN
 
 # 下载并安装 Mesa（Android 容器专用，含 turnip/kgsl）
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
-        /usr/local/sbin/install-mesa --1; \
+        GITHUB_TOKEN="${GITHUB_TOKEN}" /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
     fi
