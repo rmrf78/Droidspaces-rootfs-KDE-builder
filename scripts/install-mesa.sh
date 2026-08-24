@@ -154,7 +154,7 @@ detect_target() {
     ARCHIVE_KIND=""
 
     case "$distro_id" in
-        arch|archarm|archlinux)
+        arch|archarm|archlinux|holo-core)
             TARGET="Arch Linux"
             PACKAGE_MANAGER="pacman"
             ARCHIVE_KIND="tar"
