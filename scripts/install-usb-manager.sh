@@ -177,10 +177,19 @@ install_dependencies() {
                 xdg-utils ca-certificates curl wget tar
             ;;
         pacman)
-            pacman -Syu --noconfirm --needed \
-                python python-pyqt5 qt5-wayland qt5-svg systemd util-linux sudo \
-                android-tools ntfs-3g exfatprogs desktop-file-utils gvfs gvfs-mtp kio-extras \
-                xdg-utils ca-certificates curl wget tar
+            # 过滤掉当前仓库不存在的包：pacman 任一 target 缺失会中止整个事务
+            # （例如 Holo Core 快照没有 android-tools / ntfs-3g）
+            pkgs=""
+            for pkg in python python-pyqt5 qt5-wayland qt5-svg systemd util-linux sudo \
+                       android-tools ntfs-3g exfatprogs desktop-file-utils gvfs gvfs-mtp kio-extras \
+                       xdg-utils ca-certificates curl wget tar; do
+                if pacman -Si "$pkg" >/dev/null 2>&1; then
+                    pkgs="$pkgs $pkg"
+                else
+                    log "跳过仓库中不存在的包: $pkg" "Skipping package not in repos: $pkg"
+                fi
+            done
+            pacman -Syu --noconfirm --needed $pkgs
             ;;
     esac
 }
