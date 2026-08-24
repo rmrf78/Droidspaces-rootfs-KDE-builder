@@ -965,8 +965,9 @@ install_arch_packages() {
                 "Dependency ${dep} is not in sync repos; marking assume-installed."
             assume_installed+=(--assume-installed="$dep_base")
         fi
-    done < <(pacman -Qpi "${package_files[@]}" |
-        awk '/^depend = /{print $3}' | sort -u)
+    done < <(for f in "${package_files[@]}"; do
+            bsdtar -xOf "$f" .PKGINFO 2>/dev/null
+        done | awk '/^depend = /{print $3}' | sort -u)
 
     pacman --config "$pacman_config" -U --noconfirm \
         ${assume_installed[@]+"${assume_installed[@]}"} "${package_files[@]}"
