@@ -39,13 +39,15 @@ COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/install-anland-kde.sh /usr/local/sbin/install-anland-kde
 COPY scripts/install-mesa.sh /usr/local/sbin/install-mesa
 
+# inst(): 只安装 Holo 仓库中存在的包；缺失的跳过并记录（pacman 任一 target 缺失会中止整个事务）
 RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && \
     sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     sed -i '/NoExtract.*locale/d' /etc/pacman.conf && \
     sed -i '/NoExtract.*i18n/d' /etc/pacman.conf && \
     # jq is required by install-anland-kde.sh / install-mesa.sh release verification
     pacman -Syu --noconfirm && \
-    pacman -S --noconfirm --needed \
+    inst() { w=""; for p in "$@"; do if pacman -Si "$p" >/dev/null 2>&1; then w="$w $p"; else echo "[holo] skip (not in repo): $p"; fi; done; if [ -n "$w" ]; then pacman -S --noconfirm --needed $w; fi; } && \
+    inst \
     # Droidspaces hard-execs /sbin/init; holo does not ship it by default
     systemd-sysvcompat \
     # 核心工具组件
@@ -60,21 +62,21 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
     ############################################## KDE支持 ################################################
     # 最小化KDE
     if [ "$BUILD_KDE" = "min" ]; then \
-        pacman -S --noconfirm --needed \
+        inst \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools; \
     fi && \
     # 精简KDE
     if [ "$BUILD_KDE" = "conc" ]; then \
-        pacman -S --noconfirm --needed \
+        inst \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
         kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
     fi && \
-    # 移动版 KDE
+    # 移动版 KDE（注意：holo 快照不含 plasma-mobile 全家桶，将退化为桌面版并打印跳过日志）
     if [ "$BUILD_KDE" = "mobile" ]; then \
-        pacman -S --noconfirm --needed \
+        inst \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop plasma-workspace \
         plasma-mobile plasma-settings plasma-camera plasma-keyboard plasma-nano \
         kwin kwin-x11 qt6-wayland qt6-svg qt6-virtualkeyboard wayland-utils xorg-server \
@@ -95,24 +97,24 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
     ######################################################################################################
     #输入法 fcitx5 (可选)
     if [ "$ENABLE_srf_ARG" = "true" ]; then \
-        pacman -S --noconfirm --needed fcitx5-im; \
+        inst fcitx5-im; \
     fi && \
     if [ "$ENABLE_srf_ARG" = "true" ] && [ "$ENABLE_zh_tz_ARG" = "true" ]; then \
-        pacman -S --noconfirm --needed fcitx5-chinese-addons; \
+        inst fcitx5-chinese-addons; \
     fi && \
     ## 开发工具集成 (可选)
     if [ "$ENABLE_kfgj_ARG" = "true" ]; then \
-        pacman -S --noconfirm --needed \
+        inst \
         base-devel cmake clang llvm python python-pip; \
     fi && \
     ## 压缩工具扩展 (可选)
     if [ "$ENABLE_zip_ARG" = "true" ]; then \
-        pacman -S --noconfirm --needed \
+        inst \
         zip unzip p7zip bzip2 xz tar gzip; \
     fi && \
     ## docker (可选)
     if [ "$ENABLE_docker_ARG" = "true" ]; then \
-        pacman -S --noconfirm --needed \
+        inst \
         docker docker-compose; \
     fi && \
     ## 集成tmoe (可选)

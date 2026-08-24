@@ -457,3 +457,7 @@ BUILD_KDE=min BUILD_KDE_plus=true ENABLE_mesa_ARG=true ENABLE_anland_kde_ARG=tru
 - 快照自带 systemd 258，要求 Android 内核 ≥5.10（建议 6.x）；老内核设备请开启 `ENABLE_systemd257_ARG=true`。
 - `install-mesa.sh`（turnip/kgsl）为本分支补充的脚本，来自上游 Goldzxcbug 仓库。
 - 其余 ARG（`BUILD_KDE`、`ENABLE_anland_kde_ARG`、`ENABLE_srf_ARG` 等）与 Arch-KDE.Dockerfile 完全一致。
+
+- Holo 快照软件源比 Arch 精简，以下包不存在，模板会自动跳过（构建日志可见 `[holo] skip`）：
+  `NetworkManager`(用 systemd-networkd 替代)、`dialog`、`fastfetch`、`logrotate`、`bind`、`docker*`、`glmark2`、`vkmark`、`kfind`、`filelight`、`ffmpegthumbs`、`kimageformats`、`dolphin-plugins`、`p7zip`、`fcitx5-*`、以及 **plasma-mobile 全家桶**（`mobile` 档会退化为普通 Plasma Desktop）。
+- 所有 `pacman -S` 均通过 `inst()` 过滤器执行：任一包缺失不再中止整个事务。
