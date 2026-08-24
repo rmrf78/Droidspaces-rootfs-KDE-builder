@@ -948,7 +948,28 @@ install_arch_packages() {
 
     log "正在安装 ${#package_files[@]} 个 Arch Mesa 包..." \
         "Installing ${#package_files[@]} Arch Mesa packages..."
-    pacman --config "$pacman_config" -U --noconfirm "${package_files[@]}"
+
+    # 依赖兜底：部分发行版（如 Holo Core 快照）的同步库不提供 libstdc++/
+    # libgcc 这类“由已安装的 gcc-libs 给出文件但不声明 provides”的依赖名，
+    # 任一缺失都会令 pacman -U 整个事务中止。这里对“既不在同步库、也不在
+    # 本压缩包内”的依赖统一标记 assume-installed（运行时库确实存在）。
+    local -a assume_installed=()
+    local dep dep_base tarball_pkgs
+    tarball_pkgs="$(cat "$package_names_file")"
+    while IFS= read -r dep; do
+        [[ -n "$dep" ]] || continue
+        dep_base="${dep%%[<>=]*}"
+        grep -qx "$dep_base" <<< "$tarball_pkgs" && continue
+        if ! pacman -Si "$dep" >/dev/null 2>&1; then
+            log "同步库缺少依赖 ${dep}，标记 assume-installed。" \
+                "Dependency ${dep} is not in sync repos; marking assume-installed."
+            assume_installed+=(--assume-installed="$dep_base")
+        fi
+    done < <(pacman -Qpi "${package_files[@]}" |
+        awk '/^depend = /{print $3}' | sort -u)
+
+    pacman --config "$pacman_config" -U --noconfirm \
+        ${assume_installed[@]+"${assume_installed[@]}"} "${package_files[@]}"
 }
 
 install_tar_gz() {
