@@ -128,7 +128,7 @@ detect_target() {
     local system_name="${PRETTY_NAME:-$distro_id${version_id:+ $version_id}}"
 
     case "$distro_id" in
-        arch|archarm)
+        arch|archarm|holo-core)
             TARGET="Arch Linux"
             PACKAGE_TYPE="pkg.tar.*"
             ARCHIVE_PREFIX="anland-kde-arch-kwin-"
@@ -904,6 +904,44 @@ install_arch_packages() {
     ((${#files[@]} > 0)) || die "没有可安装的 Arch 包。" "No installable Arch packages were found."
 
     log "正在安装 ${#files[@]} 个 Arch 包..." "Installing ${#files[@]} Arch packages..."
+
+    # 依赖兜底：Holo Core 等移植发行版的同步库不提供 libstdc++/libgcc
+    # 这类“由已安装的 gcc-libs 给出文件但不声明 provides”的依赖名，任一
+    # 缺失都会令 pacman -U 整个事务中止。判定顺序：归档内包名 → 同步库
+    # 包名 → 同步库 provides（虚拟依赖）→ 标记 assume-installed。
+    local -a assume_installed=()
+    local dep dep_base sync_db
+    local -a archive_names=()
+    for package in $(pacman -Qq -p "${files[@]}" 2>/dev/null | sort -u); do
+        archive_names+=("$package")
+    done
+    while IFS= read -r dep; do
+        [[ -n "$dep" ]] || continue
+        dep_base="${dep%%[<>=]*}"
+        printf '%s\n' "${archive_names[@]}" | grep -qx "$dep_base" && continue
+        if pacman -Si "$dep" >/dev/null 2>&1; then
+            continue
+        fi
+        # 查本地同步库的 provides（覆盖 pipewire-session-manager 等虚拟依赖）
+        local satisfied=0
+        for sync_db in /var/lib/pacman/sync/*.db; do
+            [[ -e "$sync_db" ]] || continue
+            if bsdtar -xOf "$sync_db" 2>/dev/null |
+                awk -v b="$dep_base" '$1 == "%PROVIDES%" { p=1; next } p && NF { print $1; next } { p=0 }' |
+                grep -qx "$dep_base"; then
+                satisfied=1
+                break
+            fi
+        done
+        if [ "$satisfied" = "0" ]; then
+            log "同步库缺少依赖 ${dep}，标记 assume-installed。" \
+                "Dependency ${dep} is not in sync repos; marking assume-installed."
+            assume_installed+=(--assume-installed="$dep_base")
+        fi
+    done < <(for f in "${files[@]}"; do
+            bsdtar -xOf "$f" .PKGINFO 2>/dev/null
+        done | awk '/^depend = /{print $3}' | sort -u)
+
     pacman_conf="$(mktemp -t anland-kde-pacman.XXXXXXXX)"
     cp /etc/pacman.conf "$pacman_conf"
     if grep -Eq '^[[:space:]]*#?[[:space:]]*LocalFileSigLevel[[:space:]]*=' "$pacman_conf"; then
@@ -914,7 +952,8 @@ install_arch_packages() {
         rm -f -- "$pacman_conf"
         die "pacman.conf 缺少 [options] 段。" "pacman.conf has no [options] section."
     fi
-    if ! pacman --config "$pacman_conf" -U --noconfirm "${files[@]}"; then
+    if ! pacman --config "$pacman_conf" -U --noconfirm \
+            ${assume_installed[@]+"${assume_installed[@]}"} "${files[@]}"; then
         rm -f -- "$pacman_conf"
         die "Arch 软件包安装失败。" "Arch package installation failed."
     fi
