@@ -1,0 +1,402 @@
+# Dockerfile (Holo Core aarch64 KDE) -- SteamOS "Holo Core" base
+# Base image: Valve/Collabora Arch Linux aarch64 port (mash-20251118)
+#   https://gitlab.steamos.cloud/holo/holo-core-aarch64-preview
+#
+# Build natively on aarch64 (or x86_64 + qemu binfmt):
+#   ./build_rootfs-native.sh -i Holo-KDE.Dockerfile -v holomin ANLAND_KDE=...
+#
+# NOTE vs Arch-KDE.Dockerfile:
+#   * holo repo carries its own signing keys/mirrors; do NOT install archlinux-keyring
+#   * systemd-sysvcompat is REQUIRED (provides /sbin/init for Droidspaces PID1 exec)
+#   * holo snapshot ships systemd 258 -> kernels older than ~5.10 unsupported,
+#     or set ENABLE_systemd257_ARG=true to build a v257 runtime for old devices
+ARG TARGETPLATFORM
+FROM registry.gitlab.steamos.cloud/holo/holo-core-aarch64-preview/base-devel:latest AS customizer
+
+#######################################################
+ARG BUILD_KDE
+ARG BUILD_KDE_plus
+ARG PulseAudio
+ARG ENABLE_zh_tz_ARG
+ARG ENABLE_binfmt_ARG
+ARG ENABLE_yj_ARG
+ARG ENABLE_mesa_ARG
+ARG ENABLE_anland_kde_ARG
+ARG ENABLE_kfgj_ARG
+ARG ENABLE_zip_ARG
+ARG ENABLE_docker_ARG
+ARG ENABLE_srf_ARG
+ARG ENABLE_tmoe_ARG
+ARG ENABLE_systemd257_ARG
+ARG USERNAME
+ARG ANLAND_KDE_RELEASE_REPOSITORY=Goldzxcbug/Droidspaces-rootfs-KDE-builder
+ARG ANLAND_KDE_RELEASE_TAG
+ARG ANLAND_KDE_PACKAGE_REVISION=unknown
+######################################################
+
+COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
+COPY scripts/systemd257.sh /usr/local/sbin/systemd257
+COPY scripts/install-anland-kde.sh /usr/local/sbin/install-anland-kde
+COPY scripts/install-mesa.sh /usr/local/sbin/install-mesa
+
+RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && \
+    sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
+    sed -i '/NoExtract.*locale/d' /etc/pacman.conf && \
+    sed -i '/NoExtract.*i18n/d' /etc/pacman.conf && \
+    # jq is required by install-anland-kde.sh / install-mesa.sh release verification
+    pacman -Syu --noconfirm && \
+    pacman -S --noconfirm --needed \
+    # Droidspaces hard-execs /sbin/init; holo does not ship it by default
+    systemd-sysvcompat \
+    # 核心工具组件
+    bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion dbus systemd pam fastfetch logrotate \
+    tar tzdata kmod \
+    # 用户请求的基础开发/编辑工具
+    git nano sudo less which \
+    # 网络与 SSH 工具
+    openssh NetworkManager net-tools iptables iputils iproute2 bind \
+    # 系统监控
+    procps-ng lsof psmisc usbutils pciutils htop vim nano python && \
+    ############################################## KDE支持 ################################################
+    # 最小化KDE
+    if [ "$BUILD_KDE" = "min" ]; then \
+        pacman -S --noconfirm --needed \
+        xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
+        dolphin kate kinfocenter mesa-utils libpulse vulkan-tools; \
+    fi && \
+    # 精简KDE
+    if [ "$BUILD_KDE" = "conc" ]; then \
+        pacman -S --noconfirm --needed \
+        xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
+        dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
+        kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
+        kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
+    fi && \
+    # 移动版 KDE
+    if [ "$BUILD_KDE" = "mobile" ]; then \
+        pacman -S --noconfirm --needed \
+        xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop plasma-workspace \
+        plasma-mobile plasma-settings plasma-camera plasma-keyboard plasma-nano \
+        kwin kwin-x11 qt6-wayland qt6-svg qt6-virtualkeyboard wayland-utils xorg-server \
+        pipewire pipewire-pulse wireplumber powerdevil plasma-pa upower \
+        kscreen ark konsole qmlkonsole dolphin kate kinfocenter mesa-utils libpulse vulkan-tools \
+        aha clinfo dmidecode kfind plasma-systemmonitor filelight glmark2 vkmark \
+        systemsettings kscreenlocker kio-extras xdg-user-dirs \
+        dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers kimageformats \
+        plasma-browser-integration angelfish kclock libcanberra chromium \
+        gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop \
+        polkit-kde-agent; \
+    fi && \
+    # Arch 强制安装，但是这玩意不开硬件访问会导致桌面闪退
+    if [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "min" ] ; then \
+        mv /usr/lib/xdg-desktop-portal /usr/lib/xdg-desktop-portal.bak && \
+        mv /usr/lib/xdg-desktop-portal-kde /usr/lib/xdg-desktop-portal-kde.bak; \
+    fi && \
+    ######################################################################################################
+    #输入法 fcitx5 (可选)
+    if [ "$ENABLE_srf_ARG" = "true" ]; then \
+        pacman -S --noconfirm --needed fcitx5-im; \
+    fi && \
+    if [ "$ENABLE_srf_ARG" = "true" ] && [ "$ENABLE_zh_tz_ARG" = "true" ]; then \
+        pacman -S --noconfirm --needed fcitx5-chinese-addons; \
+    fi && \
+    ## 开发工具集成 (可选)
+    if [ "$ENABLE_kfgj_ARG" = "true" ]; then \
+        pacman -S --noconfirm --needed \
+        base-devel cmake clang llvm python python-pip; \
+    fi && \
+    ## 压缩工具扩展 (可选)
+    if [ "$ENABLE_zip_ARG" = "true" ]; then \
+        pacman -S --noconfirm --needed \
+        zip unzip p7zip bzip2 xz tar gzip; \
+    fi && \
+    ## docker (可选)
+    if [ "$ENABLE_docker_ARG" = "true" ]; then \
+        pacman -S --noconfirm --needed \
+        docker docker-compose; \
+    fi
+
+# 启用 Anland 时安装 ARM64 patched KWin/Xwayland（滚动 Release，无需固定 TAG）
+RUN if [ "$ENABLE_anland_kde_ARG" = "true" ]; then \
+        echo "--> [enabled] Installing Anland KDE packages (${ANLAND_KDE_PACKAGE_REVISION})..." && \
+        ANLAND_KDE_RELEASE_REPOSITORY="$ANLAND_KDE_RELEASE_REPOSITORY" \
+        ANLAND_KDE_RELEASE_TAG="${ANLAND_KDE_RELEASE_TAG:-anland-kde-packages}" \
+        /usr/local/sbin/install-anland-kde --1 && \
+        echo "--> [enabled] Anland KDE support installed"; \
+    fi
+
+# 配置 Locale 与 SSH
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
+    if [ "$ENABLE_zh_tz_ARG" = "true" ]; then \
+        ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+        echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen && \
+        locale-gen && \
+        echo "LANG=zh_CN.UTF-8" > /etc/locale.conf && \
+        echo "LC_ALL=zh_CN.UTF-8" >> /etc/locale.conf; \
+    else \
+        locale-gen && \
+        echo "LANG=en_US.UTF-8" > /etc/locale.conf && \
+        echo "LC_ALL=en_US.UTF-8" >> /etc/locale.conf; \
+    fi && \
+    # 配置 SSH 服务（禁用 root 密码登录，但允许常规密码认证）
+    mkdir -p /var/run/sshd && \
+    ssh-keygen -A && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    # 如果容器内存在默认的 alarm 用户，则清理
+    userdel -r alarm 2>/dev/null || true && \
+    useradd -m -s /bin/bash ${USERNAME} && echo "${USERNAME}:1234" | chpasswd && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf /usr/lib/systemd/system/sshd.service /etc/systemd/system/multi-user.target.wants/sshd.service
+
+# 为所有 Holo RootFS 安装 Droidspaces USB Manager
+RUN /usr/local/sbin/install-droidspaces-usb-manager --user "${USERNAME}"
+
+# 为 droidspaces 的 su/su -l 入口建立完整的 systemd 用户会话。
+RUN for pam_file in /etc/pam.d/su /etc/pam.d/su-l; do \
+        if ! grep -qE '^[[:space:]-]*session[[:space:]].*pam_systemd\.so' "$pam_file"; then \
+            sed -i '/^[[:space:]]*session[[:space:]].*pam_unix\.so/a\session        optional        pam_systemd.so' "$pam_file"; \
+        fi; \
+    done && \
+    grep -qE '^[[:space:]]*session[[:space:]].*pam_env\.so' /etc/pam.d/su-l || \
+        echo 'session        required        pam_env.so' >> /etc/pam.d/su-l
+
+# 添加环境变量（Anland 模式走 Wayland，否则注入 Termux:X11 的 DISPLAY=:5）
+RUN cat <<'EOF' > /etc/environment
+XCURSOR_SIZE=48
+EOF
+RUN if [ "$ENABLE_anland_kde_ARG" != "true" ]; then \
+        echo 'DISPLAY=:5' >> /etc/environment; \
+    else \
+        printf '%s\n' \
+          'WAYLAND_DISPLAY=wayland-0' \
+          'QT_QPA_PLATFORM=wayland' \
+          'ANLAND=1' \
+          'ANLAND_SOCKET=/run/display.sock' \
+          'ANLAND_DRM_DEVICE=/dev/dri/renderD128' \
+          'XWAYLAND_GBM_DEVICE=/dev/dri/renderD128' >> /etc/environment; \
+    fi
+# 音频选择
+RUN if [ "$PulseAudio" = "socket" ]; then \
+        echo "PULSE_SERVER=unix:/tmp/.pulse-socket" >> /etc/environment; \
+    elif [ "$PulseAudio" = "tcp" ]; then \
+        echo "PULSE_SERVER=tcp:127.0.0.1:4713" >> /etc/environment; \
+    fi
+
+# Mesa(turnip/kgsl)：Anland 与 X11 模式均使用 kgsl 后端
+RUN if [ "$ENABLE_anland_kde_ARG" = "true" ]; then \
+        if [ "$ENABLE_mesa_ARG" = "true" ]; then \
+            printf '%s\n' 'MESA_LOADER_DRIVER_OVERRIDE=kgsl' 'GALLIUM_DRIVER=kgsl' 'FD_FORCE_KGSL=1' >> /etc/environment; \
+        fi; \
+    elif [ "$ENABLE_mesa_ARG" = "true" ]; then \
+        printf '%s\n' 'MESA_LOADER_DRIVER_OVERRIDE=kgsl' 'TU_DEBUG=noconform' >> /etc/environment; \
+    fi
+
+# 输入法与 KDE 开机自启动配置
+COPY scripts/start/ /tmp/droidspaces-start/
+RUN <<'EOF_RUN'
+    if [ "$ENABLE_srf_ARG" = "true" ]; then
+    mkdir -p /home/${USERNAME}/.config/autostart
+    cat <<'EOF' > /home/${USERNAME}/.config/autostart/fcitx5.desktop
+[Desktop Entry]
+Name=Fcitx5
+GenericName=Input Method
+Comment=Start Input Method
+Exec=fcitx5 -d
+Icon=fcitx
+Terminal=false
+Type=Application
+Categories=System;Utility;
+StartupNotify=false
+NoDisplay=true
+EOF
+    cat <<'EOF' >> /etc/environment
+XMODIFIERS=@im=fcitx5
+GTK_IM_MODULE=fcitx5
+QT_IM_MODULE=fcitx5
+SDL_IM_MODULE=fcitx5
+GLFW_IM_MODULE=fcitx
+EOF
+fi
+    echo 'export XDG_RUNTIME_DIR=/run/user/$(id -u)' >> /home/${USERNAME}/.bashrc
+    if { [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ]; } && [ "$ENABLE_anland_kde_ARG" != "true" ] ; then
+    mkdir -p /home/${USERNAME}/.config
+    cat <<'EOF' > /home/${USERNAME}/.config/kwinrc
+[Compositing]
+Enabled=false
+EOF
+    fi
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    if [ "$BUILD_KDE_plus" = "true" ] && [ "$BUILD_KDE" = "mobile" ] ; then
+        install -Dm644 /tmp/droidspaces-start/plasma-mobile.service /etc/systemd/system/plasma-mobile.service
+        mkdir -p /etc/systemd/system/multi-user.target.wants
+        ln -sf /etc/systemd/system/plasma-mobile.service /etc/systemd/system/multi-user.target.wants/plasma-mobile.service
+    elif [ "$BUILD_KDE_plus" = "true" ] && [ "$ENABLE_anland_kde_ARG" = "true" ] ; then
+    install -Dm644 /tmp/droidspaces-start/plasma-wayland.service /etc/systemd/system/plasma-wayland.service
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    ln -sf /etc/systemd/system/plasma-wayland.service /etc/systemd/system/multi-user.target.wants/plasma-wayland.service
+    elif [ "$BUILD_KDE_plus" = "true" ] ; then
+    install -Dm644 /tmp/droidspaces-start/plasma-x11.service /etc/systemd/system/plasma-x11.service
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    ln -sf /etc/systemd/system/plasma-x11.service /etc/systemd/system/multi-user.target.wants/plasma-x11.service
+    fi
+    rm -rf /tmp/droidspaces-start
+EOF_RUN
+
+# 下载并安装 Mesa（Android 容器专用，含 turnip/kgsl）
+RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
+        /usr/local/sbin/install-mesa --1; \
+    else \
+        echo "--> [跳过] 未开启 Mesa 驱动安装"; \
+    fi
+
+# 修复容器内的 DHCP 网络服务配置
+RUN mkdir -p /etc/systemd/network && \
+    cat <<'EOF' > /etc/systemd/network/10-eth-dhcp.network
+[Match]
+Name=eth*
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+
+[DHCPv4]
+UseDNS=yes
+UseDomains=yes
+RouteMetric=100
+EOF
+
+# 应用 Android 运行环境兼容性修复（重点针对 Systemd 和 Udev）
+RUN <<'EOF_RUN'
+# --- 1. 常规兼容性修复 ---
+# 建立 Android 网络权限组
+grep -q '^aid_inet:' /etc/group     || echo 'aid_inet:x:3003:'    >> /etc/group
+grep -q '^aid_net_raw:' /etc/group || echo 'aid_net_raw:x:3004:' >> /etc/group
+grep -q '^aid_net_admin:' /etc/group || echo 'aid_net_admin:x:3005:' >> /etc/group
+
+# 检查并创建 droidspaces-gpu 组
+getent group droidspaces-gpu >/dev/null || groupadd -g 786 -r droidspaces-gpu
+# 为 root 及桌面用户赋予访问 Android 硬件及网络的权限组
+usermod -a -G aid_inet,aid_net_raw,input,video,tty,droidspaces-gpu root || true
+usermod -a -G aid_inet,aid_net_raw,input,video,tty,wheel,droidspaces-gpu ${USERNAME} || true
+
+# 确保 wheel 组拥有 sudo 权限
+sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+
+# --- 2. 针对 Systemd 的特定修复 ---
+ln -sf /dev/null /etc/systemd/system/systemd-networkd-wait-online.service
+ln -sf /dev/null /etc/systemd/system/systemd-journald-audit.socket
+
+# 优化 Journald 日志配置
+cat >> /etc/systemd/journald.conf << 'EOT'
+[Journal]
+ReadKMsg=no
+Audit=no
+Storage=volatile
+EOT
+
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/ds-logging.conf << 'EOT'
+[Journal]
+SystemMaxUse=200M
+RuntimeMaxUse=200M
+MaxRetentionSec=7day
+MaxLevelStore=info
+EOT
+
+mkdir -p /etc/systemd/system/multi-user.target.wants
+GUEST_SYSTEMD_PATH="/usr/lib/systemd/system"
+
+if [ -f "$GUEST_SYSTEMD_PATH/dbus.service" ]; then
+    ln -sf "$GUEST_SYSTEMD_PATH/dbus.service" "/etc/systemd/system/multi-user.target.wants/dbus.service"
+fi
+
+if [ "$ENABLE_yj_ARG" = "true" ]; then
+    for service in systemd-udevd.service systemd-resolved.service systemd-networkd.service NetworkManager.service; do
+        if [ -f "$GUEST_SYSTEMD_PATH/$service" ]; then
+            ln -sf "$GUEST_SYSTEMD_PATH/$service" "/etc/systemd/system/multi-user.target.wants/$service"
+        fi
+    done
+else
+    for service in systemd-udevd.service systemd-resolved.service systemd-networkd.service NetworkManager.service; do
+        ln -sf /dev/null "/etc/systemd/system/$service"
+    done
+fi
+
+# 在 systemd-logind 中禁用电源键行为处理
+mkdir -p /etc/systemd/logind.conf.d
+cat > /etc/systemd/logind.conf.d/99-power-key.conf << 'EOF'
+[Login]
+HandlePowerKey=ignore
+HandleSuspendKey=ignore
+HandleHibernateKey=ignore
+HandlePowerKeyLongPress=ignore
+HandlePowerKeyLongPressHibernate=ignore
+EOF
+
+# 应用 udev 覆盖配置
+mkdir -p /etc/systemd/system/systemd-udev-trigger.service.d
+cat > /etc/systemd/system/systemd-udev-trigger.service.d/override.conf << 'EOF'
+[Service]
+ExecStart=
+ExecStart=-/usr/bin/udevadm trigger --subsystem-match=usb --subsystem-match=block --subsystem-match=input --subsystem-match=tty --subsystem-match=net
+EOF
+
+# 针对只读文件系统路径覆盖
+for unit in systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service systemd-udevd-kernel.socket systemd-udev-control.socket; do
+    mkdir -p "/etc/systemd/system/${unit}.d"
+    printf "[Unit]\nConditionPathIsReadWrite=\n" > "/etc/systemd/system/${unit}.d/99-readonly-fix.conf"
+done
+
+# 限制特定的网络服务
+for unit in NetworkManager.service dhcpcd.service systemd-resolved.service systemd-networkd.service; do
+    if [ -f "$GUEST_SYSTEMD_PATH/$unit" ] || [ -f "/etc/systemd/system/multi-user.target.wants/$unit" ]; then
+        mkdir -p "/etc/systemd/system/${unit}.d"
+        cat > "/etc/systemd/system/${unit}.d/99-netmode-limit.conf" << 'EOF'
+[Service]
+ExecCondition=
+ExecCondition=/bin/sh -c "grep -qE 'net_mode=(nat|gateway)' /run/droidspaces/container.config"
+EOF
+    fi
+done
+
+# 仅在启用硬件访问时限制 udev 服务启动
+for unit in systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service; do
+    if [ -f "$GUEST_SYSTEMD_PATH/$unit" ] || [ -f "/etc/systemd/system/multi-user.target.wants/$unit" ]; then
+        mkdir -p "/etc/systemd/system/${unit}.d"
+        cat > "/etc/systemd/system/${unit}.d/99-hwaccess-limit.conf" << 'EOF'
+[Service]
+ExecCondition=
+ExecCondition=/bin/sh -c "grep -q 'enable_hw_access=1' /run/droidspaces/container.config"
+EOF
+    fi
+done
+
+# 针对 Android 环境微调日志轮转
+if [ -f /etc/logrotate.conf ]; then
+    sed -i 's/^#maxsize.*/maxsize 50M/' /etc/logrotate.conf
+    if ! grep -q "maxsize 50M" /etc/logrotate.conf; then
+        echo "maxsize 50M" >> /etc/logrotate.conf
+    fi
+fi
+
+echo "Post-extraction fixes applied on $(date)" > /etc/droidspaces
+EOF_RUN
+
+# 可选：为 systemd 258+ 发行版构建 systemd 257 旧内核兼容运行时。
+# （Holo Core 快照自带 systemd 258；4.x~早期5.x 内核设备建议开启）
+RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
+        bash /usr/local/sbin/systemd257; \
+    else \
+        echo "--> [跳过] 未启用 systemd 257 旧内核兼容"; \
+    fi && \
+    rm -f /usr/local/sbin/systemd257
+
+# 最终校验与清理：/sbin/init 必须存在（Droidspaces 默认 PID1 路径）
+RUN test -e /sbin/init && \
+    test -x /usr/lib/systemd/systemd && \
+    rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* /tmp/*
+
+# 阶段 2：将完整的根文件系统导出到 scratch（空白层），以便外部直接提取或打包成 rootfs tarball
+FROM scratch AS export
+COPY --from=customizer / /

@@ -440,3 +440,20 @@ KDE 包只作为 GitHub Release 资产发布。手动运行 `build-kde-wayland.y
 - [TMOE](https://github.com/2moe/tmoe)：容器内管理工具。
 - [anland](https://github.com/superturtlee/anland)：Wayland 显示后端和 patched KDE 相关工作。
 - [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager)：适用于Droidspaces 的 USB 存储和 ADB 设备管理工具。
+
+## Holo Core aarch64 (SteamOS 底座)
+
+`Holo-KDE.Dockerfile` 基于 Valve/Collabora 发布的 [Holo Core](https://gitlab.steamos.cloud/holo/holo-core-aarch64-preview)（Arch Linux aarch64 移植，Steam Frame 系统底座，快照 mash-20251118）构建 KDE RootFS。仅在 `aarch64` 主机原生构建（或在 x86_64 上配置 qemu binfmt 后使用 `build_rootfs-qemu-aarch64.sh -i Holo-KDE.Dockerfile`）：
+
+```bash
+BUILD_KDE=min BUILD_KDE_plus=true ENABLE_mesa_ARG=true ENABLE_anland_kde_ARG=true \
+  ./build_rootfs-native.sh -i Holo-KDE.Dockerfile -v holo-min
+```
+
+与 Arch 模板的差异：
+
+- 基础镜像为 Valve 官方 `base-devel` 容器，使用 Holo 自有软件源与密钥（不要安装 archlinux-keyring）。
+- **必须安装 `systemd-sysvcompat`**：Holo 默认不提供 `/sbin/init`，而 Droidspaces 以该路径 exec PID1；模板已内置并在构建末尾校验。
+- 快照自带 systemd 258，要求 Android 内核 ≥5.10（建议 6.x）；老内核设备请开启 `ENABLE_systemd257_ARG=true`。
+- `install-mesa.sh`（turnip/kgsl）为本分支补充的脚本，来自上游 Goldzxcbug 仓库。
+- 其余 ARG（`BUILD_KDE`、`ENABLE_anland_kde_ARG`、`ENABLE_srf_ARG` 等）与 Arch-KDE.Dockerfile 完全一致。
