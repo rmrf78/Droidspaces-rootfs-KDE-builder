@@ -16,6 +16,7 @@ on:
           - 'Fedora-43-KDE'
           - 'Fedora-44-KDE'
           - 'Arch-KDE'
+          - 'Holo-KDE'
           - 'all'
           - 'all-wayland'
       custom_username:
@@ -151,7 +152,7 @@ jobs:
               WAYLAND_PACKAGE_TARGET="all"
               ;;
             all-wayland)
-              TEMPLATES=$(jq -n -c '["Debian-13-KDE","Ubuntu-26-KDE","Fedora-43-KDE","Fedora-44-KDE","Arch-KDE"]')
+              TEMPLATES=$(jq -n -c '["Debian-13-KDE","Ubuntu-26-KDE","Fedora-43-KDE","Fedora-44-KDE","Arch-KDE","Holo-KDE"]')
               ENABLE_ANLAND_KDE="true"
               WAYLAND_PACKAGE_TARGET="all"
               ;;
@@ -175,13 +176,18 @@ jobs:
               TEMPLATES=$(jq -n -c --arg t "$TARGET" '[$t]')
               WAYLAND_PACKAGE_TARGET="Arch"
               ;;
+            Holo-KDE)
+              # Holo 为 Arch aarch64 底座，复用 Arch 的 anland 预编译包
+              TEMPLATES=$(jq -n -c --arg t "$TARGET" '[$t]')
+              WAYLAND_PACKAGE_TARGET="Arch"
+              ;;
             *)
               TEMPLATES=$(jq -n -c --arg t "$TARGET" '[$t]')
               ;;
           esac
 
-          if [ "$BUILD_KDE" = "mobile" ] && [ "$TARGET" != "Ubuntu-26-KDE" ] && [ "$TARGET" != "Debian-13-KDE" ] && [ "$TARGET" != "Fedora-43-KDE" ] && [ "$TARGET" != "Fedora-44-KDE" ] && [ "$TARGET" != "Arch-KDE" ] && [ "$TARGET" != "all-wayland" ]; then
-            echo "错误: 移动版 KDE 目前支持 Ubuntu-26-KDE、Debian-13-KDE、Fedora-43-KDE、Fedora-44-KDE、Arch-KDE、all-wayland" >&2
+          if [ "$BUILD_KDE" = "mobile" ] && [ "$TARGET" != "Ubuntu-26-KDE" ] && [ "$TARGET" != "Debian-13-KDE" ] && [ "$TARGET" != "Fedora-43-KDE" ] && [ "$TARGET" != "Fedora-44-KDE" ] && [ "$TARGET" != "Arch-KDE" ] && [ "$TARGET" != "Holo-KDE" ] && [ "$TARGET" != "all-wayland" ]; then
+            echo "错误: 移动版 KDE 目前支持 Ubuntu-26-KDE、Debian-13-KDE、Fedora-43-KDE、Fedora-44-KDE、Arch-KDE、Holo-KDE、all-wayland" >&2
             exit 1
           fi
 
@@ -201,7 +207,7 @@ jobs:
           fi
 
           if [ "$BUILD_WAYLAND_PACKAGES" = "true" ] && [ -z "$WAYLAND_PACKAGE_TARGET" ]; then
-            echo "错误: KDE Wayland 预编译包仅支持 Debian-13-KDE、Ubuntu-26-KDE、Fedora-43-KDE、Fedora-44-KDE、Arch-KDE、all 或 all-wayland" >&2
+            echo "错误: KDE Wayland 预编译包仅支持 Debian-13-KDE、Ubuntu-26-KDE、Fedora-43-KDE、Fedora-44-KDE、Arch-KDE、Holo-KDE、all 或 all-wayland" >&2
             exit 1
           fi
           
@@ -344,6 +350,7 @@ jobs:
             Fedora-43-KDE) archive_target=fedora43 ;;
             Fedora-44-KDE) archive_target=fedora44 ;;
             Arch-KDE) archive_target=arch ;;
+            Holo-KDE) archive_target=arch ;;
             *)
               echo "$TEMPLATE 不使用 Wayland 预编译包，保持默认上游来源。"
               exit 0

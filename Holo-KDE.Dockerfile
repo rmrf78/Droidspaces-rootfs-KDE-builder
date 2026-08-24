@@ -114,6 +114,12 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
     if [ "$ENABLE_docker_ARG" = "true" ]; then \
         pacman -S --noconfirm --needed \
         docker docker-compose; \
+    fi && \
+    ## 集成tmoe (可选)
+    if [ "$ENABLE_tmoe_ARG" = "true" ]; then \
+        git clone --depth=1 https://github.com/2moe/tmoe-linux.git /usr/local/etc/tmoe-linux/git && \
+        ln -sf /usr/local/etc/tmoe-linux/git/debian.sh /usr/local/bin/tmoe && \
+        chmod -R 755 /usr/local/etc/tmoe-linux; \
     fi
 
 # 启用 Anland 时安装 ARM64 patched KWin/Xwayland（滚动 Release，无需固定 TAG）
@@ -190,6 +196,11 @@ RUN if [ "$ENABLE_anland_kde_ARG" = "true" ]; then \
         fi; \
     elif [ "$ENABLE_mesa_ARG" = "true" ]; then \
         printf '%s\n' 'MESA_LOADER_DRIVER_OVERRIDE=kgsl' 'TU_DEBUG=noconform' >> /etc/environment; \
+    fi
+
+# 修复 8Gen2 Wayland 花屏（Anland 模式）
+RUN if [ "$ENABLE_8gen2_wayland_ARG" = "true" ]; then \
+        echo 'FD_DEV_FEATURES=enable_tp_ubwc_flag_hint=1' >> /etc/environment; \
     fi
 
 # 输入法与 KDE 开机自启动配置
